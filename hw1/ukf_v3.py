@@ -195,11 +195,11 @@ def ukf_estimation(mu_tm1, Sigma_tm1, z_t, u_t, wm, wc, gamma, R, Q, dt, landmar
     # (30x7)
     Zeta_t_bar = predict_sigma_observation(X_t_bar, landmark_gt)            # alg line 7: a predicted obsv is computed for each sigma point (to verify)
     
-    # (30x1) for z_t
-    # replace the elements in z_t where there were no observation with the average from the r, phi of sigma points estimates from line 7
-    for i in range(z_t.shape[0]):
-        if z_t[i, 0] == 0:
-            z_t[i, 0] = Zeta_t_bar[i, :].mean()        # takes the average
+    # # (30x1) for z_t
+    # # replace the elements in z_t where there were no observation with the average from the r, phi of sigma points estimates from line 7
+    # for i in range(z_t.shape[0]):
+    #     if z_t[i, 0] == 0:
+    #         z_t[i, 0] = Zeta_t_bar[i, :].mean()        # takes the average
     
     # continue with update
     # (30x1)
@@ -295,12 +295,83 @@ def is_action_row(row):
 
 
 
+def run_ukf(dataset, mu_tm1, Sigma_tm1, z_t, u_t, wm, wc, gamma, R, Q, dt, landmark_gt, M):
+    """
+    mu_tm1, Sigma_tm1, z_t, u_t, wm, wc, gamma, R, Q, dt, 
+    landmark_gt, 
+    M: last M steps to plot
+    
+    """
+    # i_actions means run up to the ith_action step and stop
+    if dataset == "v2":
+        # this is the dataset with 5121 actions
+        all_data = pd.read_csv("action-update_v2.csv")
+
+
+    elif dataset == "v3":
+        # this is the dataset with u_t = [0,0] removed
+        all_data = pd.read_csv("action-update_v3.csv")
+    else:
+        print("Invalid dataset")
+        return
+
+
+def draw_animation(hist_gt, hist_dr, hist_mu, ldmk_xcoords, ldmk_ycoords, M=0, **kwargs):
+    """
+    draws the animation of the robot's path with last M steps where M=0 means all steps
+    and **kwargs may hold the parameters for the run (used in title)
+    """
+    plt.cla()
+    # for stopping simulation with the esc key.
+    plt.gcf().canvas.mpl_connect('key_release_event',
+            lambda event: [exit(0) if event.key == 'escape' else None])
+    # plot the true posn of robot
+    plt.plot(np.array(hist_gt[0, -M:]).flatten(),
+                np.array(hist_gt[1, -M:]).flatten(), "-b", label="Ground Truth")
+    # plot posn with symbol
+    plt.plot(hist_gt[0, -1], hist_gt[1, -1], 'D', markersize=3, color='b')
+
+    # plot the dead reckoning posn of robot
+    plt.plot(np.array(hist_dr[0, -M:]).flatten(),
+                np.array(hist_dr[1, -M:]).flatten(), "-k", label="Dead Reckoning")
+    # plot posn with symbol
+    plt.plot(hist_dr[0, -1], hist_dr[1, -1], 'o', markersize=3, color='k')
+
+    # plot the ukf posn of robot
+    plt.plot(np.array(hist_mu[0, -M:]).flatten(),
+                np.array(hist_mu[1, -M:]).flatten(), "-r", label="UKF")
+    # plot posn with symbol
+    plt.plot(hist_mu[0, -1], hist_mu[1, -1], 's', markersize=3, color='r')
+
+    # plot the landmarks
+    plt.scatter(ldmk_xcoords, ldmk_ycoords, marker='^', c='orange')
+
+    # plt.axis("equal")
+    plt.xlabel('X Axis')
+    plt.ylabel('Y Axis')
+    plt.gcf().canvas.manager.set_window_title('Timelapse Plot')
+    plt.title(f'Run with alpha=, beta=, kappa=, sigma=, R=, Q=.')             # Showing the parameters
+    plt.grid(True)
+    plt.legend(loc='upper left', bbox_to_anchor=(1, 1))
+    plt.tight_layout()
+
+    plt.pause(0.001)
+    # plt.pause(0.1)
+    # plt.pause(0.5)
+
 def main():
     print("---------------------------------------Start---------------------------------------")
 
     ### Read Data Files ###
     landmark_gt, gt, msmt, odo = read_data()
 
+    ldmk_xcoords = landmark_gt['x [m]']
+    ldmk_ycoords = landmark_gt['y [m]']
+
+    run_ukf("v3", mu_tm1, Sigma_tm1, z_t, u_t, wm, wc, gamma, R, Q, dt, landmark_gt, M=50)
+
+
+    # Read in the specified data
     all_data = pd.read_csv("action-update.csv")
                         #    names=["Time [s]",                                                  # time index
                         #           "Forward Velocity [m/s]","Angular Velocity [rad/s]",         # odometry
@@ -311,15 +382,19 @@ def main():
     nx = 3  # State Vector [x y heading]
     
     
-    # init ground truth and dead reckoning and cur state to known ground truth
-    gt_state = dr_state = mu_tm1 = np.array([gt.iloc[0]["x [m]"], gt.iloc[0]["y [m]"], gt.iloc[0]["Orientation [rad]"]]).reshape(-1, 1)  
+    # # init ground truth and dead reckoning and cur state to known ground truth
+    # gt_state = dr_state = mu_tm1 = np.array([gt.iloc[0]["x [m]"], gt.iloc[0]["y [m]"], gt.iloc[0]["Orientation [rad]"]]).reshape(-1, 1)  
+
+    # set init to gt of 1st action step
+    gt_state = dr_state = mu_tm1 = np.array([all_data.iloc[1]["x [m]"], all_data.iloc[1]["y [m]"], all_data.iloc[1]["Orientation [rad]"]]).reshape(-1, 1)  
     
     
     # Init covariance matrix is Identity Matrix because (???)
     # if this is too large, then it can make filter trust measurements too much.
     # Sigma_tm1 = np.eye(nx)    
-    # Sigma_tm1 = np.zeros((nx, nx))
-    Sigma_tm1 = np.diag([0.00001] * nx)
+    Sigma_tm1 = np.zeros((nx, nx))
+    # Sigma_tm1 = np.diag([0.00001] * nx)
+    # Sigma_tm1 = np.diag([0.00000000000000001] * nx)
 
     # Covariance for UKF simulation
     R = np.diag([
@@ -360,8 +435,6 @@ def main():
     # i is always the action index
     while i < N:
 
-        
-
         print(f"i: {i}, action {actions_ctr}, state x y theta: {mu_tm1[0]} {mu_tm1[1]} {mu_tm1[2]}")
         actions_ctr += 1
 
@@ -388,6 +461,10 @@ def main():
             Q[2*(subj-subj_offset), 2*(subj-subj_offset)] = OBSERVED_UNCERTAINTY
             j += 1
         
+        # if reached end f experiment, break
+        if j >= N:
+            break
+
         # get the dt from next action
         dt = all_data.iloc[j]["Time [s]"] - all_data.iloc[i]["Time [s]"]
         # move to next action step
@@ -404,29 +481,20 @@ def main():
         hist_dr = np.hstack((hist_dr, dr_state))
         hist_mu = np.hstack((hist_mu, mu_tm1))
 
-        if show_animation:
-            plt.cla()
-            # for stopping simulation with the esc key.
-            plt.gcf().canvas.mpl_connect('key_release_event',
-                    lambda event: [exit(0) if event.key == 'escape' else None])
-            # plot the true posn of robot
-            plt.plot(np.array(hist_gt[0, :]).flatten(),
-                     np.array(hist_gt[1, :]).flatten(), "-b")
-            # plot the dead reckoning posn of robot
-            plt.plot(np.array(hist_dr[0, :]).flatten(),
-                     np.array(hist_dr[1, :]).flatten(), "-k")
-            # plot the ukf posn of robot
-            plt.plot(np.array(hist_mu[0, :]).flatten(),
-                     np.array(hist_mu[1, :]).flatten(), "-r")
-            plt.axis("equal")
-            plt.grid(True)
-            plt.pause(0.001)
-            # plt.pause(0.1)
-            # plt.pause(0.5)
+        # plot all history or last M steps
+        M = 10
 
-        # end if reached
-        if i >= N:
-            break
+        if show_animation:
+            draw_animation(hist_gt, hist_dr, hist_mu, ldmk_xcoords, ldmk_ycoords, M)
+
+    if not show_animation:
+        # plot the final state here
+        draw_animation(hist_gt, hist_dr, hist_mu, ldmk_xcoords, ldmk_ycoords, M)
+    
+    print("Press escape or ctrl-c to close the plot/animation!")
+    while True:
+        plt.pause(0.001)
+    print("---------------------------------------End---------------------------------------")
 
 
 if __name__ == '__main__':
